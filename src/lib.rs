@@ -51,14 +51,6 @@ impl<'a> SliceString<'a> {
         unsafe { str::from_utf8_unchecked_mut(&mut self.0) }
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub fn capacity(&self) -> usize {
         self.0.capacity()
     }
