@@ -1,8 +1,7 @@
 #![no_std]
-use core::{fmt, ops, str};
+use core::{fmt, hash, ops, str};
 use tinyvec::SliceVec;
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct SliceString<'a>(SliceVec<'a, u8>);
 
@@ -24,7 +23,7 @@ impl<'a> SliceString<'a> {
         Self::new_unchecked(SliceVec::from_slice_len(buf, len))
     }
 
-    pub unsafe fn as_mut_slicevec<'b: 'a>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
+    pub unsafe fn as_mut_slicevec<'b>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
         &mut self.0
     }
 
@@ -44,15 +43,15 @@ impl<'a> SliceString<'a> {
         self.0.capacity()
     }
 
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
     pub fn truncate(&mut self, new_len: usize) {
         if new_len <= self.len() {
             assert!(self.is_char_boundary(new_len));
             self.0.truncate(new_len);
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.0.clear()
     }
 
     pub fn pop(&mut self) -> Option<char> {
@@ -82,6 +81,20 @@ impl<'a> SliceString<'a> {
         }
         Ok(self.0.extend_from_slice(bytes))
     }
+
+    pub fn split_off<'b>(&'b mut self, at: usize) -> SliceString<'a> {
+        if at <= self.len() {
+            assert!(self.is_char_boundary(at));
+        }
+        let new = self.0.split_off(at);
+        unsafe { Self::new_unchecked(new) }
+    }
+}
+
+impl<'a> Default for SliceString<'a> {
+    fn default() -> Self {
+        Self::new(&mut [])
+    }
 }
 
 impl<'a> From<SliceString<'a>> for SliceVec<'a, u8> {
@@ -89,6 +102,12 @@ impl<'a> From<SliceString<'a>> for SliceVec<'a, u8> {
         other.0
     }
 }
+
+// impl<'a> From<SliceString<'a>> for &mut [u8] {
+//    fn from(other: SliceString<'a>) -> Self {
+//        other.0.as_mut()
+//    }
+// }
 
 impl<'a> TryFrom<&'a mut [u8]> for SliceString<'a> {
     type Error = str::Utf8Error;
@@ -121,11 +140,53 @@ impl<'a> ops::DerefMut for SliceString<'a> {
     }
 }
 
-impl<'a> fmt::Display for SliceString<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <str as fmt::Display>::fmt(self, f)
+impl<'a> AsRef<str> for SliceString<'a> {
+    fn as_ref(&self) -> &str {
+        self
     }
 }
+
+impl<'a> AsMut<str> for SliceString<'a> {
+    fn as_mut(&mut self) -> &mut str {
+        self
+    }
+}
+
+impl<'a> AsRef<SliceVec<'a, u8>> for SliceString<'a> {
+    fn as_ref(&self) -> &SliceVec<'a, u8> {
+        &self.0
+    }
+}
+
+impl<'a> AsRef<[u8]> for SliceString<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+// impl<'a> core::borrow::Borrow<[u8]> for SliceString<'a> {
+//     fn borrow(&self) -> &[u8] {
+//         self.as_ref()
+//     }
+// }
+//
+// impl<'a> core::borrow::Borrow<SliceVec<'a, u8>> for SliceString<'a> {
+//     fn borrow(&self) -> &SliceVec<'a, u8> {
+//         &self.0
+//     }
+// }
+//
+// impl<'a> core::borrow::Borrow<str> for SliceString<'a> {
+//     fn borrow(&self) -> &str {
+//         self
+//     }
+// }
+//
+// impl<'a> core::borrow::BorrowMut<str> for SliceString<'a> {
+//     fn borrow_mut(&mut self) -> &mut str {
+//         self
+//     }
+// }
 
 impl<'a> fmt::Write for SliceString<'a> {
     fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
@@ -137,15 +198,31 @@ impl<'a> fmt::Write for SliceString<'a> {
     }
 }
 
-impl<'a> AsRef<str> for SliceString<'a> {
-    fn as_ref(&self) -> &str {
-        self
+impl<'a> fmt::Debug for SliceString<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <str as fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<'a> AsRef<[u8]> for SliceString<'a> {
-    fn as_ref(&self) -> &[u8] {
-        self.as_bytes()
+impl<'a> fmt::Display for SliceString<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <str as fmt::Display>::fmt(self, f)
+    }
+}
+
+impl<'a> hash::Hash for SliceString<'a> {
+    fn hash<H: hash::Hasher>(&self, hasher: &mut H) {
+        <str as hash::Hash>::hash(self, hasher)
+    }
+}
+
+impl<'a> PartialEq for SliceString<'a> {
+    fn eq(&self, rhs: &SliceString<'a>) -> bool {
+        str::eq(&**self, &**rhs)
+    }
+
+    fn ne(&self, rhs: &SliceString<'a>) -> bool {
+        str::ne(&**self, &**rhs)
     }
 }
 
@@ -186,6 +263,20 @@ impl<'a> PartialEq<SliceString<'a>> for &str {
     }
     fn ne(&self, other: &SliceString<'a>) -> bool {
         str::ne(&self[..], &other[..])
+    }
+}
+
+impl<'a> Eq for SliceString<'a> {}
+
+impl<'a> PartialOrd for SliceString<'a> {
+    fn partial_cmp(&self, other: &SliceString<'a>) -> Option<core::cmp::Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+}
+
+impl<'a> Ord for SliceString<'a> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        Ord::cmp(&**self, &**other)
     }
 }
 
