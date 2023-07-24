@@ -63,8 +63,8 @@ impl<'a> SliceString<'a> {
     pub fn truncate(&mut self, new_len: usize) {
         if new_len <= self.len() {
             assert!(self.is_char_boundary(new_len));
-            self.0.truncate(new_len);
         }
+        self.0.truncate(new_len);
     }
 
     pub fn pop(&mut self) -> Option<char> {
@@ -73,27 +73,15 @@ impl<'a> SliceString<'a> {
         Some(ch)
     }
 
-    pub fn push(&mut self, c: char) -> Result<(), Error> {
-        let len = c.len_utf8();
-        if self.capacity() < self.len() + len {
-            return Err(Error);
-        }
-        match len {
+    pub fn push(&mut self, c: char) {
+        match c.len_utf8() {
             1 => self.0.push(c as u8),
-            _ => self
-                .0
-                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+            _ => self.push_str(c.encode_utf8(&mut [0; 4])),
         }
-        Ok(())
     }
 
-    pub fn push_str(&mut self, string: &str) -> Result<(), Error> {
-        let bytes = string.as_bytes();
-        if self.capacity() < self.len() + bytes.len() {
-            return Err(Error);
-        }
-        self.0.extend_from_slice(bytes);
-        Ok(())
+    pub fn push_str(&mut self, string: &str) {
+        self.0.extend_from_slice(string.as_bytes())
     }
 
     pub fn split_off(&mut self, at: usize) -> SliceString<'a> {
@@ -190,11 +178,21 @@ impl<'a> AsRef<[u8]> for SliceString<'a> {
 
 impl<'a> fmt::Write for SliceString<'a> {
     fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
-        self.push_str(s).map_err(|_| fmt::Error)
+        let bytes = s.as_bytes();
+        if self.capacity() < self.len() + bytes.len() {
+            return Err(fmt::Error);
+        }
+        self.push_str(s);
+        Ok(())
     }
 
     fn write_char(&mut self, c: char) -> Result<(), fmt::Error> {
-        self.push(c).map_err(|_| fmt::Error)
+        let len = c.len_utf8();
+        if self.capacity() < self.len() + len {
+            return Err(fmt::Error);
+        }
+        self.push(c);
+        Ok(())
     }
 }
 
@@ -267,6 +265,7 @@ impl<'a> Ord for SliceString<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::fmt::Write;
 
     #[test]
     fn new() {
@@ -275,30 +274,30 @@ mod tests {
         assert_eq!(0, s.len());
         assert_eq!(s.capacity(), 16);
 
-        s.push_str("Hello world!").unwrap();
+        s.push_str("Hello world!");
         assert_eq!(s.as_str(), "Hello world!");
 
         assert!(!s.is_empty());
         s.clear();
         assert_eq!(s.len(), 0);
 
-        s.push_str("foo").unwrap();
+        s.push_str("foo");
         s.truncate(2);
         assert_eq!(s.len(), 2);
         assert_eq!(s.as_str(), "fo");
 
-        s.push('r').unwrap();
+        s.push('r');
         assert_eq!(s.as_str(), "for");
 
-        s.push_str("oooooooooooooooooooooo").unwrap_err();
+        s.write_str("oooooooooooooooooooooo").unwrap_err();
 
         let mut a = s.split_off(2);
         assert_eq!(s.as_str(), "fo");
         assert_eq!(a.as_str(), "r");
 
-        a.push_str("ab").unwrap();
-        s.push_str("").unwrap();
-        s.push('o').unwrap_err();
+        a.push_str("ab");
+        s.push_str("");
+        s.write_char('o').unwrap_err();
         assert_eq!(s.capacity(), 2);
         assert_eq!(a.capacity(), 16 - 2);
 
@@ -307,6 +306,23 @@ mod tests {
 
         assert_eq!(s.pop().unwrap(), 'o');
         assert_eq!(s.pop().unwrap(), 'f');
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_push() {
+        let mut buf = [0u8; 1];
+        let mut s = SliceString::new(&mut buf[..]);
+        s.push('f');
+        s.push('o');
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_push_str() {
+        let mut buf = [0u8; 1];
+        let mut s = SliceString::new(&mut buf[..]);
+        s.push_str("fo");
     }
 
     #[test]
@@ -320,8 +336,6 @@ mod tests {
 
     #[test]
     fn disp() {
-        use core::fmt::Write;
-
         let mut b1 = "abcd".as_bytes().to_owned();
         let s1 = SliceString::try_from(&mut b1[..]).unwrap();
         let mut s = String::new();
@@ -341,8 +355,8 @@ mod tests {
         assert_eq!(s.len(), 2);
         assert_eq!(s.pop().unwrap(), 'é');
         assert_eq!(s.len(), 0);
-        s.push('ö').unwrap();
-        s.push_str("ü").unwrap();
+        s.push('ö');
+        s.push_str("ü");
         assert_eq!(s.as_str(), "öü");
     }
 }
