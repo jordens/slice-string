@@ -67,7 +67,7 @@ impl<'a> SliceString<'a> {
     }
 
     pub fn pop(&mut self) -> Option<char> {
-        let ch = self.chars().next_back()?;
+        let ch = self.chars().last()?;
         self.0.truncate(self.len() - ch.len_utf8());
         Some(ch)
     }
@@ -77,11 +77,11 @@ impl<'a> SliceString<'a> {
         if self.capacity() < self.len() + len {
             return Err(Error);
         }
-        if len == 1 {
-            self.0.push(c as u8);
-        } else {
-            self.0
-                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+        match len {
+            1 => self.0.push(c as u8),
+            _ => self
+                .0
+                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
         }
         Ok(())
     }
