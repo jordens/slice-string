@@ -6,6 +6,7 @@ use core::{fmt, hash, ops, str};
 use tinyvec::SliceVec;
 
 #[repr(transparent)]
+#[derive(Default)]
 pub struct SliceString<'a>(SliceVec<'a, u8>);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -102,12 +103,6 @@ impl<'a> SliceString<'a> {
         let new = self.0.split_off(at);
         // UTF8 validity is maintained
         unsafe { Self::new_unchecked(new) }
-    }
-}
-
-impl<'a> Default for SliceString<'a> {
-    fn default() -> Self {
-        Self::new(&mut [])
     }
 }
 
