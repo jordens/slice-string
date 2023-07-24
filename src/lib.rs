@@ -392,4 +392,16 @@ mod tests {
         s.push_str("ü");
         assert_eq!(s.as_str(), "öü");
     }
+
+    #[test]
+    fn write() {
+        let mut b = [0; 8];
+        let mut s = SliceString::new(&mut b[..]);
+        s.write_str("a").unwrap();
+        s.write_char('b').unwrap();
+        write!(s, "cdefgh").unwrap();
+        assert_eq!(s.len(), 8);
+        write!(s, "").unwrap();
+        write!(s, "a").unwrap_err();
+    }
 }
