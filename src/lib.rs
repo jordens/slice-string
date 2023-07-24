@@ -8,11 +8,16 @@ pub struct SliceString<'a>(SliceVec<'a, u8>);
 
 impl<'a> SliceString<'a> {
     pub fn new(buf: &'a mut [u8]) -> Self {
-        Self(SliceVec::from_slice_len(buf, 0))
+        unsafe { Self::from_utf8_unchecked(buf, 0) }
     }
 
-    pub fn into_slicevec(self) -> SliceVec<'a, u8> {
-        self.0
+    pub fn from_utf8(buf: &'a mut [u8], len: usize) -> Result<Self, str::Utf8Error> {
+        str::from_utf8(&buf[..len])?;
+        Ok(unsafe { Self::from_utf8_unchecked(buf, len) })
+    }
+
+    pub unsafe fn from_utf8_unchecked(buf: &'a mut [u8], len: usize) -> Self {
+        Self(SliceVec::from_slice_len(buf, len))
     }
 
     pub unsafe fn as_mut_slicevec<'b: 'a>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
@@ -72,6 +77,20 @@ impl<'a> SliceString<'a> {
             assert!(self.is_char_boundary(new_len));
             self.0.truncate(new_len);
         }
+    }
+}
+
+impl<'a> From<SliceString<'a>> for SliceVec<'a, u8> {
+    fn from(other: SliceString<'a>) -> Self {
+        other.0
+    }
+}
+
+impl<'a> TryFrom<&'a mut [u8]> for SliceString<'a> {
+    type Error = str::Utf8Error;
+
+    fn try_from(other: &'a mut [u8]) -> Result<Self, Self::Error> {
+        Self::from_utf8(other, other.len())
     }
 }
 
