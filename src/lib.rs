@@ -1,42 +1,62 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+#![deny(rust_2018_compatibility)]
+#![deny(rust_2018_idioms)]
+
 use core::{fmt, hash, ops, str};
 use tinyvec::SliceVec;
 
 #[repr(transparent)]
 pub struct SliceString<'a>(SliceVec<'a, u8>);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Error;
+
 impl<'a> SliceString<'a> {
     pub fn new(buf: &'a mut [u8]) -> Self {
+        // The length-0 UTF8 string is always valid.
         unsafe { Self::from_utf8_unchecked(buf, 0) }
     }
 
+    /// # Safety
+    /// The buffer passed must be valid UTF8.
     pub unsafe fn new_unchecked(buf: SliceVec<'a, u8>) -> Self {
         Self(buf)
     }
 
     pub fn from_utf8(buf: &'a mut [u8], len: usize) -> Result<Self, str::Utf8Error> {
         str::from_utf8(&buf[..len])?;
+        // UTF8 validity of the buffer up to `len` has just been checked.
         Ok(unsafe { Self::from_utf8_unchecked(buf, len) })
     }
 
+    /// # Safety
+    /// The data in `buf[..len]` must be valid UTF8.
     pub unsafe fn from_utf8_unchecked(buf: &'a mut [u8], len: usize) -> Self {
         Self::new_unchecked(SliceVec::from_slice_len(buf, len))
     }
 
+    /// # Safety
+    /// The data in the buffer must always remain valid UTF8.
     pub unsafe fn as_mut_slicevec<'b>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
         &mut self.0
     }
 
     pub fn as_str(&self) -> &str {
+        // UTF8 validity has been maintained
         unsafe { str::from_utf8_unchecked(&self.0) }
     }
 
     pub fn as_mut_str(&mut self) -> &mut str {
+        // UTF8 validity has been maintained
         unsafe { str::from_utf8_unchecked_mut(&mut self.0) }
     }
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn capacity(&self) -> usize {
@@ -55,31 +75,33 @@ impl<'a> SliceString<'a> {
     }
 
     pub fn pop(&mut self) -> Option<char> {
-        let ch = self.chars().rev().next()?;
+        let ch = self.chars().next_back()?;
         self.0.truncate(self.len() - ch.len_utf8());
         Some(ch)
     }
 
-    pub fn push(&mut self, c: char) -> Result<(), ()> {
+    pub fn push(&mut self, c: char) -> Result<(), Error> {
         let len = c.len_utf8();
         if self.capacity() < self.len() + len {
-            return Err(());
+            return Err(Error);
         }
         if len == 1 {
-            Ok(self.0.push(c as u8))
+            self.0.push(c as u8);
         } else {
             let mut buf = [0; 4];
             c.encode_utf8(&mut buf);
-            Ok(self.0.extend_from_slice(&buf))
+            self.0.extend_from_slice(&buf);
         }
+        Ok(())
     }
 
-    pub fn push_str(&mut self, string: &str) -> Result<(), ()> {
+    pub fn push_str(&mut self, string: &str) -> Result<(), Error> {
         let bytes = string.as_bytes();
         if self.capacity() < self.len() + bytes.len() {
-            return Err(());
+            return Err(Error);
         }
-        Ok(self.0.extend_from_slice(bytes))
+        self.0.extend_from_slice(bytes);
+        Ok(())
     }
 
     pub fn split_off<'b>(&'b mut self, at: usize) -> SliceString<'a> {
@@ -87,6 +109,7 @@ impl<'a> SliceString<'a> {
             assert!(self.is_char_boundary(at));
         }
         let new = self.0.split_off(at);
+        // UTF8 validity is maintained
         unsafe { Self::new_unchecked(new) }
     }
 }
@@ -98,31 +121,45 @@ impl<'a> Default for SliceString<'a> {
 }
 
 impl<'a> From<SliceString<'a>> for SliceVec<'a, u8> {
-    fn from(other: SliceString<'a>) -> Self {
-        other.0
+    fn from(value: SliceString<'a>) -> Self {
+        value.0
     }
 }
 
-// impl<'a> From<SliceString<'a>> for &mut [u8] {
-//    fn from(other: SliceString<'a>) -> Self {
-//        other.0.as_mut()
-//    }
+impl<'a> From<SliceString<'a>> for (&'a mut [u8], usize) {
+    fn from(mut value: SliceString<'a>) -> Self {
+        let data = value.0.as_mut_ptr();
+        // Unfortunately there is no way to destructure SliceVec
+        let data = unsafe { core::slice::from_raw_parts_mut(data, value.capacity()) };
+        (data, value.len())
+    }
+}
+
+// impl<'a, A> TryFrom<&'a mut A> for SliceString<'a>
+// where
+//     A: AsMut<[u8]>,
+// {
+//     type Error = str::Utf8Error;
+//     fn try_from(value: &'a mut A) -> Result<Self, Self::Error> {
+//         Self::try_from(value.as_mut())
+//     }
 // }
 
 impl<'a> TryFrom<&'a mut [u8]> for SliceString<'a> {
     type Error = str::Utf8Error;
 
-    fn try_from(other: &'a mut [u8]) -> Result<Self, Self::Error> {
-        Self::from_utf8(other, other.len())
+    fn try_from(value: &'a mut [u8]) -> Result<Self, Self::Error> {
+        Self::from_utf8(value, value.len())
     }
 }
 
 impl<'a> TryFrom<SliceVec<'a, u8>> for SliceString<'a> {
     type Error = str::Utf8Error;
 
-    fn try_from(other: SliceVec<'a, u8>) -> Result<Self, Self::Error> {
-        str::from_utf8(&other)?;
-        Ok(unsafe { Self::new_unchecked(other) })
+    fn try_from(value: SliceVec<'a, u8>) -> Result<Self, Self::Error> {
+        str::from_utf8(&value)?;
+        // UTF8 validity has just been checked.
+        Ok(unsafe { Self::new_unchecked(value) })
     }
 }
 
@@ -164,30 +201,6 @@ impl<'a> AsRef<[u8]> for SliceString<'a> {
     }
 }
 
-// impl<'a> core::borrow::Borrow<[u8]> for SliceString<'a> {
-//     fn borrow(&self) -> &[u8] {
-//         self.as_ref()
-//     }
-// }
-//
-// impl<'a> core::borrow::Borrow<SliceVec<'a, u8>> for SliceString<'a> {
-//     fn borrow(&self) -> &SliceVec<'a, u8> {
-//         &self.0
-//     }
-// }
-//
-// impl<'a> core::borrow::Borrow<str> for SliceString<'a> {
-//     fn borrow(&self) -> &str {
-//         self
-//     }
-// }
-//
-// impl<'a> core::borrow::BorrowMut<str> for SliceString<'a> {
-//     fn borrow_mut(&mut self) -> &mut str {
-//         self
-//     }
-// }
-
 impl<'a> fmt::Write for SliceString<'a> {
     fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
         self.push_str(s).map_err(|_| fmt::Error)
@@ -220,19 +233,12 @@ impl<'a> PartialEq for SliceString<'a> {
     fn eq(&self, rhs: &SliceString<'a>) -> bool {
         str::eq(&**self, &**rhs)
     }
-
-    fn ne(&self, rhs: &SliceString<'a>) -> bool {
-        str::ne(&**self, &**rhs)
-    }
 }
 
 // SliceString<'a> == str
 impl<'a> PartialEq<str> for SliceString<'a> {
     fn eq(&self, other: &str) -> bool {
-        str::eq(&self[..], &other[..])
-    }
-    fn ne(&self, other: &str) -> bool {
-        str::ne(&self[..], &other[..])
+        str::eq(&self[..], other)
     }
 }
 
@@ -241,18 +247,12 @@ impl<'a> PartialEq<&str> for SliceString<'a> {
     fn eq(&self, other: &&str) -> bool {
         str::eq(&self[..], &other[..])
     }
-    fn ne(&self, other: &&str) -> bool {
-        str::ne(&self[..], &other[..])
-    }
 }
 
 // str == SliceString<'a>
 impl<'a> PartialEq<SliceString<'a>> for str {
     fn eq(&self, other: &SliceString<'a>) -> bool {
-        str::eq(&self[..], &other[..])
-    }
-    fn ne(&self, other: &SliceString<'a>) -> bool {
-        str::ne(&self[..], &other[..])
+        str::eq(self, &other[..])
     }
 }
 
@@ -260,9 +260,6 @@ impl<'a> PartialEq<SliceString<'a>> for str {
 impl<'a> PartialEq<SliceString<'a>> for &str {
     fn eq(&self, other: &SliceString<'a>) -> bool {
         str::eq(&self[..], &other[..])
-    }
-    fn ne(&self, other: &SliceString<'a>) -> bool {
-        str::ne(&self[..], &other[..])
     }
 }
 
@@ -286,12 +283,40 @@ mod tests {
 
     #[test]
     fn new() {
-        let mut buf = [0u8; 32];
+        let mut buf = [0u8; 16];
         let mut s = SliceString::new(&mut buf[..]);
         assert_eq!(0, s.len());
+
         s.push_str("Hello world!").unwrap();
         assert_eq!(s.as_str(), "Hello world!");
 
+        assert!(!s.is_empty());
+        s.clear();
+        assert_eq!(s.len(), 0);
+
+        s.push_str("foo").unwrap();
+        s.truncate(2);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s.as_str(), "fo");
+
+        s.push('r').unwrap();
+        assert_eq!(s.as_str(), "for");
+
+        assert!(s.push_str("oooooooooooooooooooooo").is_err());
+
+        let a = s.split_off(2);
+        assert_eq!(s.as_str(), "fo");
+        assert_eq!(a.as_str(), "r");
+
         let _r = unsafe { s.as_mut_slicevec() };
+    }
+
+    #[test]
+    fn cmp() {
+        let mut b1 = "abcd".as_bytes().to_owned();
+        let s1 = SliceString::try_from(&mut b1[..]).unwrap();
+        let mut b2 = "zzzz".as_bytes().to_owned();
+        let s2 = SliceString::try_from(&mut b2[..]).unwrap();
+        assert!(s1 < s2);
     }
 }
