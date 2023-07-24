@@ -1,7 +1,9 @@
 #![no_std]
-use core::{ops, str};
+use core::{fmt, ops, str};
 use tinyvec::SliceVec;
 
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct SliceString<'a>(SliceVec<'a, u8>);
 
 impl<'a> SliceString<'a> {
@@ -9,13 +11,19 @@ impl<'a> SliceString<'a> {
         Self(SliceVec::from_slice_len(buf, 0))
     }
 
+    pub fn into_slicevec(self) -> SliceVec<'a, u8> {
+        self.0
+    }
+
+    pub unsafe fn as_mut_slicevec<'b: 'a>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
+        &mut self.0
+    }
+
     pub fn as_str(&self) -> &str {
-        // split_at_unchecked?
         unsafe { str::from_utf8_unchecked(&self.0) }
     }
 
     pub fn as_mut_str(&mut self) -> &mut str {
-        // split_at_unchecked?
         unsafe { str::from_utf8_unchecked_mut(&mut self.0) }
     }
 
@@ -24,16 +32,19 @@ impl<'a> SliceString<'a> {
     }
 
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.0.clear()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     pub fn push_str(&mut self, string: &str) -> Result<(), ()> {
         let bytes = string.as_bytes();
-        if self.capacity() < self.0.len() + bytes.len() {
+        if self.capacity() < self.len() + bytes.len() {
             return Err(());
         }
-        self.0.extend_from_slice(bytes);
-        Ok(())
+        Ok(self.0.extend_from_slice(bytes))
     }
 
     pub fn pop(&mut self) -> Option<char> {
@@ -48,12 +59,12 @@ impl<'a> SliceString<'a> {
             return Err(());
         }
         if len == 1 {
-            self.0.push(c as u8);
+            Ok(self.0.push(c as u8))
         } else {
-            self.0
-                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            Ok(self
+                .0
+                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()))
         }
-        Ok(())
     }
 
     pub fn truncate(&mut self, new_len: usize) {
@@ -72,6 +83,80 @@ impl<'a> ops::Deref for SliceString<'a> {
     }
 }
 
+impl<'a> ops::DerefMut for SliceString<'a> {
+    fn deref_mut(&mut self) -> &mut str {
+        self.as_mut_str()
+    }
+}
+
+impl<'a> fmt::Display for SliceString<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <str as fmt::Display>::fmt(self, f)
+    }
+}
+
+impl<'a> fmt::Write for SliceString<'a> {
+    fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
+        self.push_str(s).map_err(|_| fmt::Error)
+    }
+
+    fn write_char(&mut self, c: char) -> Result<(), fmt::Error> {
+        self.push(c).map_err(|_| fmt::Error)
+    }
+}
+
+impl<'a> AsRef<str> for SliceString<'a> {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+impl<'a> AsRef<[u8]> for SliceString<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+// SliceString<'a> == str
+impl<'a> PartialEq<str> for SliceString<'a> {
+    fn eq(&self, other: &str) -> bool {
+        str::eq(&self[..], &other[..])
+    }
+    fn ne(&self, other: &str) -> bool {
+        str::ne(&self[..], &other[..])
+    }
+}
+
+// SliceString<'a> == &'str
+impl<'a> PartialEq<&str> for SliceString<'a> {
+    fn eq(&self, other: &&str) -> bool {
+        str::eq(&self[..], &other[..])
+    }
+    fn ne(&self, other: &&str) -> bool {
+        str::ne(&self[..], &other[..])
+    }
+}
+
+// str == SliceString<'a>
+impl<'a> PartialEq<SliceString<'a>> for str {
+    fn eq(&self, other: &SliceString<'a>) -> bool {
+        str::eq(&self[..], &other[..])
+    }
+    fn ne(&self, other: &SliceString<'a>) -> bool {
+        str::ne(&self[..], &other[..])
+    }
+}
+
+// &'str == SliceString<'a>
+impl<'a> PartialEq<SliceString<'a>> for &str {
+    fn eq(&self, other: &SliceString<'a>) -> bool {
+        str::eq(&self[..], &other[..])
+    }
+    fn ne(&self, other: &SliceString<'a>) -> bool {
+        str::ne(&self[..], &other[..])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +168,7 @@ mod tests {
         assert_eq!(0, s.len());
         s.push_str("Hello world!").unwrap();
         assert_eq!(s.as_str(), "Hello world!");
+
+        let _r = unsafe { s.as_mut_slicevec() };
     }
 }
