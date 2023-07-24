@@ -11,6 +11,10 @@ impl<'a> SliceString<'a> {
         unsafe { Self::from_utf8_unchecked(buf, 0) }
     }
 
+    pub unsafe fn new_unchecked(buf: SliceVec<'a, u8>) -> Self {
+        Self(buf)
+    }
+
     pub fn from_utf8(buf: &'a mut [u8], len: usize) -> Result<Self, str::Utf8Error> {
         str::from_utf8(&buf[..len])?;
         Ok(unsafe { Self::from_utf8_unchecked(buf, len) })
@@ -66,9 +70,9 @@ impl<'a> SliceString<'a> {
         if len == 1 {
             Ok(self.0.push(c as u8))
         } else {
-            Ok(self
-                .0
-                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()))
+            let mut buf = [0; 4];
+            c.encode_utf8(&mut buf);
+            Ok(self.0.extend_from_slice(&buf))
         }
     }
 
@@ -91,6 +95,15 @@ impl<'a> TryFrom<&'a mut [u8]> for SliceString<'a> {
 
     fn try_from(other: &'a mut [u8]) -> Result<Self, Self::Error> {
         Self::from_utf8(other, other.len())
+    }
+}
+
+impl<'a> TryFrom<SliceVec<'a, u8>> for SliceString<'a> {
+    type Error = str::Utf8Error;
+
+    fn try_from(other: SliceVec<'a, u8>) -> Result<Self, Self::Error> {
+        str::from_utf8(&other)?;
+        Ok(unsafe { Self::new_unchecked(other) })
     }
 }
 
