@@ -37,7 +37,7 @@ impl<'a> SliceString<'a> {
 
     /// # Safety
     /// The data in the buffer must always remain valid UTF8.
-    pub unsafe fn as_mut_slicevec<'b>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
+    pub unsafe fn as_mut_slicevec(&mut self) -> &mut SliceVec<'a, u8> {
         &mut self.0
     }
 
@@ -80,9 +80,8 @@ impl<'a> SliceString<'a> {
         if len == 1 {
             self.0.push(c as u8);
         } else {
-            let mut buf = [0; 4];
-            c.encode_utf8(&mut buf);
-            self.0.extend_from_slice(&buf);
+            self.0
+                .extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
         }
         Ok(())
     }
@@ -96,7 +95,7 @@ impl<'a> SliceString<'a> {
         Ok(())
     }
 
-    pub fn split_off<'b>(&'b mut self, at: usize) -> SliceString<'a> {
+    pub fn split_off(&mut self, at: usize) -> SliceString<'a> {
         if at <= self.len() {
             assert!(self.is_char_boundary(at));
         }
@@ -120,9 +119,10 @@ impl<'a> From<SliceString<'a>> for SliceVec<'a, u8> {
 
 impl<'a> From<SliceString<'a>> for (&'a mut [u8], usize) {
     fn from(mut value: SliceString<'a>) -> Self {
-        let data = value.0.as_mut_ptr();
+        let data = value.as_mut_ptr();
+        let len = value.capacity();
         // Unfortunately there is no way to destructure SliceVec
-        let data = unsafe { core::slice::from_raw_parts_mut(data, value.capacity()) };
+        let data = unsafe { core::slice::from_raw_parts_mut(data, len) };
         (data, value.len())
     }
 }
@@ -278,6 +278,7 @@ mod tests {
         let mut buf = [0u8; 16];
         let mut s = SliceString::new(&mut buf[..]);
         assert_eq!(0, s.len());
+        assert_eq!(s.capacity(), 16);
 
         s.push_str("Hello world!").unwrap();
         assert_eq!(s.as_str(), "Hello world!");
@@ -294,13 +295,23 @@ mod tests {
         s.push('r').unwrap();
         assert_eq!(s.as_str(), "for");
 
-        assert!(s.push_str("oooooooooooooooooooooo").is_err());
+        s.push_str("oooooooooooooooooooooo").unwrap_err();
 
-        let a = s.split_off(2);
+        let mut a = s.split_off(2);
         assert_eq!(s.as_str(), "fo");
         assert_eq!(a.as_str(), "r");
 
-        let _r = unsafe { s.as_mut_slicevec() };
+        a.push_str("ab").unwrap();
+        s.push_str("").unwrap();
+        s.push('o').unwrap_err();
+        assert_eq!(s.capacity(), 2);
+        assert_eq!(a.capacity(), 16 - 2);
+
+        let r = unsafe { s.as_mut_slicevec() };
+        assert_eq!(r.as_ref(), "fo".as_bytes());
+
+        assert_eq!(s.pop().unwrap(), 'o');
+        assert_eq!(s.pop().unwrap(), 'f');
     }
 
     #[test]
@@ -310,5 +321,33 @@ mod tests {
         let mut b2 = "zzzz".as_bytes().to_owned();
         let s2 = SliceString::try_from(&mut b2[..]).unwrap();
         assert!(s1 < s2);
+    }
+
+    #[test]
+    fn disp() {
+        use core::fmt::Write;
+
+        let mut b1 = "abcd".as_bytes().to_owned();
+        let s1 = SliceString::try_from(&mut b1[..]).unwrap();
+        let mut s = String::new();
+        write!(s, "{}", s1).unwrap();
+        assert_eq!("abcd", s);
+    }
+
+    #[test]
+    fn pop_uenc() {
+        let mut b = "éé".as_bytes().to_owned();
+        assert_eq!(b.len(), 2 + 3);
+        let mut s = SliceString::try_from(&mut b[..]).unwrap();
+        assert_eq!(s.len(), 2 + 3);
+        assert_eq!(s.pop().unwrap(), '\u{0301}');
+        assert_eq!(s.len(), 2 + 1);
+        assert_eq!(s.pop().unwrap(), 'e');
+        assert_eq!(s.len(), 2);
+        assert_eq!(s.pop().unwrap(), 'é');
+        assert_eq!(s.len(), 0);
+        s.push('ö').unwrap();
+        s.push_str("ü").unwrap();
+        assert_eq!(s.as_str(), "öü");
     }
 }
