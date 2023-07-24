@@ -210,8 +210,7 @@ impl<'a> AsRef<[u8]> for SliceString<'a> {
 
 impl<'a> fmt::Write for SliceString<'a> {
     fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
-        let bytes = s.as_bytes();
-        if self.capacity() < self.len() + bytes.len() {
+        if self.capacity() < self.len() + s.len() {
             return Err(fmt::Error);
         }
         self.push_str(s);
