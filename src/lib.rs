@@ -1,65 +1,91 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(rust_2018_compatibility)]
 #![deny(rust_2018_idioms)]
+#![deny(missing_docs)]
+#![deny(warnings)]
+
+//! This module implements support for a String-like structure that is backed by a slice.
 
 use core::{fmt, hash, ops, str};
-use tinyvec::SliceVec;
+pub use tinyvec;
+use tinyvec::SliceVec; // re-export
 
+/// A UTF-8-encoded growable string backed by a `u8` slice.
+///
+/// This supports some of the API from `std::String` and dereferences
+/// to `core::str`.
 #[repr(transparent)]
 #[derive(Default)]
 pub struct SliceString<'a>(SliceVec<'a, u8>);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Error;
-
 impl<'a> SliceString<'a> {
+    /// Create a new empty `SliceString` from a mutable slice.
+    ///
+    /// The capacity of the string will be the slice length.
     pub fn new(buf: &'a mut [u8]) -> Self {
-        // The length-0 UTF8 string is always valid.
+        // Length-0 slices are always valid UTF-8.
         unsafe { Self::from_utf8_unchecked(buf, 0) }
     }
 
+    /// Create a new `SliceString` from a [SliceVec].
+    ///
     /// # Safety
-    /// The buffer passed must be valid UTF8.
+    /// The data in `SliceVec` must be valid UTF-8.
     pub unsafe fn new_unchecked(buf: SliceVec<'a, u8>) -> Self {
         Self(buf)
     }
 
+    /// Create a new `SliceString` from a mutable slice.
+    ///
+    /// The data in `buf[..len]` are checked to contain valid UTF-8.
     pub fn from_utf8(buf: &'a mut [u8], len: usize) -> Result<Self, str::Utf8Error> {
         str::from_utf8(&buf[..len])?;
-        // UTF8 validity of the buffer up to `len` has just been checked.
+        // UTF-8 validity of the buffer up to `len` has just been checked.
         Ok(unsafe { Self::from_utf8_unchecked(buf, len) })
     }
 
+    /// Create a new `SliceString` from a mutable slice.
+    ///
     /// # Safety
-    /// The data in `buf[..len]` must be valid UTF8.
+    /// The data in `buf[..len]` must be valid UTF-8.
     pub unsafe fn from_utf8_unchecked(buf: &'a mut [u8], len: usize) -> Self {
         Self::new_unchecked(SliceVec::from_slice_len(buf, len))
     }
 
+    /// Return a mutable reference to the inner `SliceVec`.
+    ///
     /// # Safety
-    /// The data in the buffer must always remain valid UTF8.
+    /// The data in the buffer must always remain valid UTF-8.
     pub unsafe fn as_mut_slicevec(&mut self) -> &mut SliceVec<'a, u8> {
         &mut self.0
     }
 
+    /// Return a reference to a UTF-8 `str`.
     pub fn as_str(&self) -> &str {
-        // UTF8 validity has been maintained
+        // UTF-8 validity has been maintained
         unsafe { str::from_utf8_unchecked(&self.0) }
     }
 
+    /// Return a mutable reference to a UTF-8 `str`.
     pub fn as_mut_str(&mut self) -> &mut str {
-        // UTF8 validity has been maintained
+        // UTF-8 validity has been maintained
         unsafe { str::from_utf8_unchecked_mut(&mut self.0) }
     }
 
+    /// Return the maximum number of bytes this string can contain.
     pub fn capacity(&self) -> usize {
         self.0.capacity()
     }
 
+    /// Set the current string length to zero.
     pub fn clear(&mut self) {
         self.0.clear()
     }
 
+    /// Set the length to be at most the given number of `u8`.
+    ///
+    /// # Panics
+    /// The new length must be at a character boundary.
     pub fn truncate(&mut self, new_len: usize) {
         if new_len <= self.len() {
             assert!(self.is_char_boundary(new_len));
@@ -67,12 +93,17 @@ impl<'a> SliceString<'a> {
         self.0.truncate(new_len);
     }
 
+    /// Return the last `char` in the string, or `None` if empty.
     pub fn pop(&mut self) -> Option<char> {
         let ch = self.chars().last()?;
         self.0.truncate(self.len() - ch.len_utf8());
         Some(ch)
     }
 
+    /// Append a `char` to the string.
+    ///
+    /// # Panics
+    /// The remaining space must be sufficient.
     pub fn push(&mut self, c: char) {
         match c.len_utf8() {
             1 => self.0.push(c as u8),
@@ -80,16 +111,27 @@ impl<'a> SliceString<'a> {
         }
     }
 
+    /// Append a `str` to the string.
+    ///
+    /// # Panics
+    /// The remaining space must be sufficient.
     pub fn push_str(&mut self, string: &str) {
         self.0.extend_from_slice(string.as_bytes())
     }
 
+    /// Split the string and return the remainder.
+    ///
+    /// The current `SliceString` capacity and length are reduced to `at`.
+    /// A new `SliceString` is returned containing the data and buffer space starting at `at`.
+    ///
+    /// # Panics
+    /// The split location must be at a character boundary.
     pub fn split_off(&mut self, at: usize) -> SliceString<'a> {
         if at <= self.len() {
             assert!(self.is_char_boundary(at));
         }
         let new = self.0.split_off(at);
-        // UTF8 validity is maintained
+        // UTF-8 validity is maintained
         unsafe { Self::new_unchecked(new) }
     }
 }
@@ -110,16 +152,6 @@ impl<'a> From<SliceString<'a>> for (&'a mut [u8], usize) {
     }
 }
 
-// impl<'a, A> TryFrom<&'a mut A> for SliceString<'a>
-// where
-//     A: AsMut<[u8]>,
-// {
-//     type Error = str::Utf8Error;
-//     fn try_from(value: &'a mut A) -> Result<Self, Self::Error> {
-//         Self::try_from(value.as_mut())
-//     }
-// }
-
 impl<'a> TryFrom<&'a mut [u8]> for SliceString<'a> {
     type Error = str::Utf8Error;
 
@@ -133,7 +165,7 @@ impl<'a> TryFrom<SliceVec<'a, u8>> for SliceString<'a> {
 
     fn try_from(value: SliceVec<'a, u8>) -> Result<Self, Self::Error> {
         str::from_utf8(&value)?;
-        // UTF8 validity has just been checked.
+        // UTF-8 validity has just been checked.
         Ok(unsafe { Self::new_unchecked(value) })
     }
 }
@@ -187,8 +219,7 @@ impl<'a> fmt::Write for SliceString<'a> {
     }
 
     fn write_char(&mut self, c: char) -> Result<(), fmt::Error> {
-        let len = c.len_utf8();
-        if self.capacity() < self.len() + len {
+        if self.capacity() < self.len() + c.len_utf8() {
             return Err(fmt::Error);
         }
         self.push(c);
