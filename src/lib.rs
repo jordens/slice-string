@@ -21,7 +21,7 @@ impl<'a> SliceString<'a> {
     }
 
     pub unsafe fn from_utf8_unchecked(buf: &'a mut [u8], len: usize) -> Self {
-        Self(SliceVec::from_slice_len(buf, len))
+        Self::new_unchecked(SliceVec::from_slice_len(buf, len))
     }
 
     pub unsafe fn as_mut_slicevec<'b: 'a>(&'b mut self) -> &'a mut SliceVec<'b, u8> {
@@ -36,24 +36,23 @@ impl<'a> SliceString<'a> {
         unsafe { str::from_utf8_unchecked_mut(&mut self.0) }
     }
 
-    pub fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    pub fn clear(&mut self) {
-        self.0.clear()
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    pub fn push_str(&mut self, string: &str) -> Result<(), ()> {
-        let bytes = string.as_bytes();
-        if self.capacity() < self.len() + bytes.len() {
-            return Err(());
+    pub fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len <= self.len() {
+            assert!(self.is_char_boundary(new_len));
+            self.0.truncate(new_len);
         }
-        Ok(self.0.extend_from_slice(bytes))
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
     }
 
     pub fn pop(&mut self) -> Option<char> {
@@ -76,11 +75,12 @@ impl<'a> SliceString<'a> {
         }
     }
 
-    pub fn truncate(&mut self, new_len: usize) {
-        if new_len <= self.len() {
-            assert!(self.is_char_boundary(new_len));
-            self.0.truncate(new_len);
+    pub fn push_str(&mut self, string: &str) -> Result<(), ()> {
+        let bytes = string.as_bytes();
+        if self.capacity() < self.len() + bytes.len() {
+            return Err(());
         }
+        Ok(self.0.extend_from_slice(bytes))
     }
 }
 
