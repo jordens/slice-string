@@ -295,6 +295,43 @@ impl<'a> Ord for SliceString<'a> {
     }
 }
 
+impl<'a> Extend<char> for SliceString<'a> {
+    fn extend<T: IntoIterator<Item = char>>(&mut self, iter: T) {
+        let iterator = iter.into_iter();
+        iterator.for_each(move |c| self.push(c));
+    }
+}
+
+impl<'a> Extend<&'a char> for SliceString<'a> {
+    fn extend<I: IntoIterator<Item = &'a char>>(&mut self, iter: I) {
+        self.extend(iter.into_iter().cloned());
+    }
+}
+
+impl<'a> Extend<&'a str> for SliceString<'a> {
+    fn extend<T: IntoIterator<Item = &'a str>>(&mut self, iter: T) {
+        iter.into_iter().for_each(move |s| self.push_str(s));
+    }
+}
+
+impl<'a> ops::Add<&'a str> for SliceString<'a> {
+    type Output = SliceString<'a>;
+    #[inline]
+    fn add(mut self, rhs: &str) -> Self::Output {
+        self.push_str(rhs);
+        self
+    }
+}
+
+impl<'a> ops::AddAssign<&'a str> for SliceString<'a> {
+    #[inline]
+    fn add_assign(&mut self, rhs: &'a str) {
+        self.push_str(rhs);
+    }
+}
+
+// TODO: {Index,IndexMut}<{Range,RangeInclusive,RangeFrom,RangeTo,RangeToInclusive,RangeFull}>
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +428,32 @@ mod tests {
         s.push('ö');
         s.push_str("ü");
         assert_eq!(s.as_str(), "öü");
+    }
+
+    #[test]
+    fn write() {
+        let mut b = [0; 8];
+        let mut s = SliceString::new(&mut b[..]);
+        s.write_str("a").unwrap();
+        s.write_char('b').unwrap();
+        write!(s, "cdefgh").unwrap();
+        assert_eq!(s.len(), 8);
+        write!(s, "").unwrap();
+        write!(s, "a").unwrap_err();
+    }
+
+    #[test]
+    fn extend() {
+        let mut b = [0; 8];
+        let q = ["foo"];
+        let mut i = q.iter().copied();
+        let ii = &mut i;
+        {
+            let mut s = SliceString::new(&mut b[..]);
+            s.extend(ii);
+            println!("{}", s + "d");
+        }
+        println!("{:?}", i.next());
+        println!("{}", q[0])
     }
 }
