@@ -6,6 +6,9 @@
 
 //! This module implements support for a String-like structure that is backed by a slice.
 
+#[cfg(feature = "ufmt-impl")]
+mod ufmt;
+
 use core::{fmt, hash, ops, str};
 pub use tinyvec;
 use tinyvec::SliceVec; // re-export
